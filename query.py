@@ -5,24 +5,20 @@ import json
 
 from snowflake.core import Root
 
-from core import get_snowflake_connection
-
-SCHEMA = "DEMOS.AGENT_MEMORY"
-DB = "DEMOS"
-SCHEMA_NAME = "AGENT_MEMORY"
+from core import add_common_args, get_config, get_snowflake_connection
 
 
-def get_search_service(conn, service_name):
+def get_search_service(conn, db, schema, service_name):
     root = Root(conn)
-    return root.databases[DB].schemas[SCHEMA_NAME].cortex_search_services[service_name]
+    return root.databases[db].schemas[schema].cortex_search_services[service_name]
 
 
-def cmd_conversations(args):
-    conn = get_snowflake_connection()
+def cmd_conversations(args, fqn, db, sc):
+    conn = get_snowflake_connection(args.snowflake_connection)
     cur = conn.cursor()
 
     if args.search:
-        svc = get_search_service(conn, "CONVERSATIONS_SEARCH")
+        svc = get_search_service(conn, db, sc, "CONVERSATIONS_SEARCH")
         resp = svc.search(
             query=args.search,
             columns=["SESSION_ID", "TITLE", "SUMMARY", "MESSAGE_COUNT", "STARTED_AT"],
@@ -35,14 +31,14 @@ def cmd_conversations(args):
     elif args.id:
         cur.execute(f"""
             SELECT SESSION_ID, TITLE, SOURCE, STARTED_AT, LAST_MESSAGE_AT, MESSAGE_COUNT, SUMMARY
-            FROM {SCHEMA}.CONVERSATIONS WHERE SESSION_ID = %s
+            FROM {fqn}.CONVERSATIONS WHERE SESSION_ID = %s
         """, (args.id,))
         for row in cur.fetchall():
             print_row(dict(zip([d[0] for d in cur.description], row)), args.format)
     else:
         cur.execute(f"""
             SELECT SESSION_ID, TITLE, MESSAGE_COUNT, STARTED_AT, LEFT(SUMMARY, 80) AS SUMMARY
-            FROM {SCHEMA}.CONVERSATIONS ORDER BY STARTED_AT DESC LIMIT %s
+            FROM {fqn}.CONVERSATIONS ORDER BY STARTED_AT DESC LIMIT %s
         """, (args.limit,))
         rows = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
         print_rows(rows, args.format)
@@ -51,12 +47,12 @@ def cmd_conversations(args):
     conn.close()
 
 
-def cmd_messages(args):
-    conn = get_snowflake_connection()
+def cmd_messages(args, fqn, db, sc):
+    conn = get_snowflake_connection(args.snowflake_connection)
     cur = conn.cursor()
 
     if args.search:
-        svc = get_search_service(conn, "MESSAGES_SEARCH")
+        svc = get_search_service(conn, db, sc, "MESSAGES_SEARCH")
 
         filters = []
         if args.id:
@@ -94,7 +90,7 @@ def cmd_messages(args):
 
         cur.execute(f"""
             SELECT MESSAGE_ID, SESSION_ID, TURN_INDEX, ROLE, LEFT(CONTENT, 200) AS CONTENT
-            FROM {SCHEMA}.MESSAGES {where}
+            FROM {fqn}.MESSAGES {where}
             ORDER BY SESSION_ID, TURN_INDEX
             LIMIT %s
         """, params)
@@ -105,15 +101,15 @@ def cmd_messages(args):
     conn.close()
 
 
-def cmd_transcript(args):
+def cmd_transcript(args, fqn, db, sc):
     if not args.id:
         print("Error: --id is required for transcript")
         return
 
-    conn = get_snowflake_connection()
+    conn = get_snowflake_connection(args.snowflake_connection)
     cur = conn.cursor()
     cur.execute(f"""
-        SELECT ROLE, CONTENT FROM {SCHEMA}.MESSAGES
+        SELECT ROLE, CONTENT FROM {fqn}.MESSAGES
         WHERE SESSION_ID = %s AND CONTENT IS NOT NULL
         ORDER BY TURN_INDEX
     """, (args.id,))
@@ -126,22 +122,22 @@ def cmd_transcript(args):
     conn.close()
 
 
-def cmd_stats(args):
-    conn = get_snowflake_connection()
+def cmd_stats(args, fqn, db, sc):
+    conn = get_snowflake_connection(args.snowflake_connection)
     cur = conn.cursor()
 
-    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.CONVERSATIONS")
+    cur.execute(f"SELECT COUNT(*) FROM {fqn}.CONVERSATIONS")
     conv_count = cur.fetchone()[0]
 
-    cur.execute(f"SELECT COUNT(*) FROM {SCHEMA}.MESSAGES")
+    cur.execute(f"SELECT COUNT(*) FROM {fqn}.MESSAGES")
     msg_count = cur.fetchone()[0]
 
-    cur.execute(f"SELECT MIN(STARTED_AT), MAX(LAST_MESSAGE_AT) FROM {SCHEMA}.CONVERSATIONS")
+    cur.execute(f"SELECT MIN(STARTED_AT), MAX(LAST_MESSAGE_AT) FROM {fqn}.CONVERSATIONS")
     row = cur.fetchone()
 
     cur.execute(f"""
         SELECT SESSION_ID, TITLE, MESSAGE_COUNT
-        FROM {SCHEMA}.CONVERSATIONS
+        FROM {fqn}.CONVERSATIONS
         ORDER BY MESSAGE_COUNT DESC LIMIT 5
     """)
     top = [dict(zip([d[0] for d in cur.description], r)) for r in cur.fetchall()]
@@ -185,6 +181,7 @@ def print_rows(rows, fmt):
 
 def main():
     parser = argparse.ArgumentParser(description="Query CoCo conversation history")
+    add_common_args(parser)
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_conv = sub.add_parser("conversations", aliases=["c"], help="List or search conversations")
@@ -207,15 +204,17 @@ def main():
     sub.add_parser("stats", help="Show summary statistics")
 
     args = parser.parse_args()
+    db, sc = get_config(args.database, args.schema)
+    fqn = f"{db}.{sc}"
 
     if args.command in ("conversations", "c"):
-        cmd_conversations(args)
+        cmd_conversations(args, fqn, db, sc)
     elif args.command in ("messages", "m"):
-        cmd_messages(args)
+        cmd_messages(args, fqn, db, sc)
     elif args.command in ("transcript", "t"):
-        cmd_transcript(args)
+        cmd_transcript(args, fqn, db, sc)
     elif args.command == "stats":
-        cmd_stats(args)
+        cmd_stats(args, fqn, db, sc)
 
 
 if __name__ == "__main__":

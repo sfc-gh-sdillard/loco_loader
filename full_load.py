@@ -1,22 +1,28 @@
 """Full load: extract all CoCo conversations and load from scratch."""
 
+import argparse
 import json
 from datetime import datetime, timezone
 
 from core import (
+    add_common_args,
     ensure_search_services,
     ensure_tables,
     fetch_transcript,
+    get_config,
     get_snowflake_connection,
     list_conversations,
     parse_messages,
 )
 
 
-def full_load():
+def full_load(connection_name=None, database=None, schema=None):
+    db, sc = get_config(database, schema)
+    fqn = f"{db}.{sc}"
+
     print("Connecting to Snowflake...")
-    conn = get_snowflake_connection()
-    ensure_tables(conn)
+    conn = get_snowflake_connection(connection_name)
+    ensure_tables(conn, fqn)
     cur = conn.cursor()
 
     print("Fetching conversation list...")
@@ -24,8 +30,8 @@ def full_load():
     print(f"Found {len(conversations)} conversations")
 
     # Truncate both tables for clean reload
-    cur.execute("TRUNCATE TABLE IF EXISTS DEMOS.AGENT_MEMORY.MESSAGES")
-    cur.execute("TRUNCATE TABLE IF EXISTS DEMOS.AGENT_MEMORY.CONVERSATIONS")
+    cur.execute(f"TRUNCATE TABLE IF EXISTS {fqn}.MESSAGES")
+    cur.execute(f"TRUNCATE TABLE IF EXISTS {fqn}.CONVERSATIONS")
 
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -70,8 +76,8 @@ def full_load():
     # Phase 2: Bulk insert conversations
     print("Loading conversations...", flush=True)
     for row in conv_rows:
-        cur.execute("""
-            INSERT INTO DEMOS.AGENT_MEMORY.CONVERSATIONS
+        cur.execute(f"""
+            INSERT INTO {fqn}.CONVERSATIONS
                 (SESSION_ID, TITLE, SOURCE, STARTED_AT, LAST_MESSAGE_AT,
                  LAST_LOADED_AT, MESSAGE_COUNT, TRANSCRIPT)
             SELECT %s, %s, %s, TRY_TO_TIMESTAMP_NTZ(%s), TRY_TO_TIMESTAMP_NTZ(%s),
@@ -82,8 +88,8 @@ def full_load():
     # Phase 3: Bulk insert messages
     print("Loading messages...", flush=True)
     for row in msg_rows:
-        cur.execute("""
-            INSERT INTO DEMOS.AGENT_MEMORY.MESSAGES
+        cur.execute(f"""
+            INSERT INTO {fqn}.MESSAGES
                 (MESSAGE_ID, SESSION_ID, TURN_INDEX, ROLE, CONTENT, RAW_CONTENT, CREATED_AT)
             SELECT %s, %s, %s, %s, %s, PARSE_JSON(%s), TRY_TO_TIMESTAMP_NTZ(%s)
         """, row)
@@ -91,8 +97,8 @@ def full_load():
 
     # Phase 4: Generate summaries
     print("Generating summaries via AI_COMPLETE...", flush=True)
-    cur.execute("""
-        UPDATE DEMOS.AGENT_MEMORY.CONVERSATIONS
+    cur.execute(f"""
+        UPDATE {fqn}.CONVERSATIONS
         SET SUMMARY = AI_COMPLETE(
                 'llama3.1-70b',
                 'Summarize this Cortex Code conversation in 2-3 sentences. Focus on what was discussed and accomplished:\\n\\n' ||
@@ -106,7 +112,7 @@ def full_load():
 
     # Phase 5: Refresh Cortex Search services
     print("Refreshing Cortex Search services...", flush=True)
-    ensure_search_services(conn)
+    ensure_search_services(conn, fqn)
     print("  Search services created/refreshed")
 
     cur.close()
@@ -115,4 +121,7 @@ def full_load():
 
 
 if __name__ == "__main__":
-    full_load()
+    parser = argparse.ArgumentParser(description="Full load of CoCo conversations")
+    add_common_args(parser)
+    args = parser.parse_args()
+    full_load(args.snowflake_connection, args.database, args.schema)

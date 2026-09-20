@@ -3,24 +3,46 @@
 import csv
 import io
 import json
+import os
 import subprocess
 from pathlib import Path
 from cryptography.hazmat.primitives import serialization
 
 import snowflake.connector
 
-SCHEMA = "DEMOS.AGENT_MEMORY"
-CONNECTION_NAME = "demo-account-admin-sdillard"
+DEFAULT_DATABASE = "DEMOS"
+DEFAULT_SCHEMA = "AGENT_MEMORY"
 CONNECTIONS_TOML = Path.home() / ".snowflake" / "connections.toml"
 
 
-def get_snowflake_connection():
+def get_config(database=None, schema=None):
+    """Resolve database and schema from args, env vars, or defaults."""
+    db = database or os.environ.get("SNOWFLAKE_DATABASE", DEFAULT_DATABASE)
+    sc = schema or os.environ.get("SNOWFLAKE_SCHEMA", DEFAULT_SCHEMA)
+    return db, sc
+
+
+def add_common_args(parser):
+    """Add --snowflake-connection, --database, and --schema flags to a parser."""
+    parser.add_argument("--snowflake-connection", help="Connection name from ~/.snowflake/connections.toml")
+    parser.add_argument("--database", help=f"Target database (default: ${DEFAULT_DATABASE} or $SNOWFLAKE_DATABASE)")
+    parser.add_argument("--schema", help=f"Target schema (default: {DEFAULT_SCHEMA} or $SNOWFLAKE_SCHEMA)")
+
+
+def get_snowflake_connection(connection_name=None):
     """Connect to Snowflake using the connections.toml config."""
     import tomllib
     with open(CONNECTIONS_TOML, "rb") as f:
         config = tomllib.load(f)
 
-    conn_cfg = config[CONNECTION_NAME]
+    connection_name = connection_name or os.environ.get("SNOWFLAKE_CONNECTION")
+    if not connection_name:
+        raise RuntimeError(
+            "Set the SNOWFLAKE_CONNECTION env var or pass --snowflake-connection "
+            "to specify a connection name from ~/.snowflake/connections.toml"
+        )
+
+    conn_cfg = config[connection_name]
     key_path = Path(conn_cfg["private_key_path"]).expanduser()
     with open(key_path, "rb") as kf:
         private_key = serialization.load_pem_private_key(kf.read(), password=None)
@@ -37,8 +59,6 @@ def get_snowflake_connection():
         private_key=private_key_bytes,
         role=conn_cfg.get("role", "FREEPLAY"),
         warehouse=conn_cfg.get("warehouse", "COMPUTE_WH"),
-        database="DEMOS",
-        schema="AGENT_MEMORY",
     )
 
 
@@ -105,11 +125,11 @@ def parse_messages(session_id, transcript):
     return rows
 
 
-def ensure_tables(conn):
-    """Create tables if they don't exist. Schema DEMOS.AGENT_MEMORY must already exist."""
+def ensure_tables(conn, fqn):
+    """Create tables if they don't exist. Schema must already exist."""
     cur = conn.cursor()
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS DEMOS.AGENT_MEMORY.CONVERSATIONS (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {fqn}.CONVERSATIONS (
             SESSION_ID         VARCHAR PRIMARY KEY,
             TITLE              VARCHAR,
             SOURCE             VARCHAR,
@@ -123,8 +143,8 @@ def ensure_tables(conn):
         )
         COMMENT = 'Quick recall of CoCo conversations: lookup summaries, pull whole transcripts, or browse session metadata.'
     """)
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS DEMOS.AGENT_MEMORY.MESSAGES (
+    cur.execute(f"""
+        CREATE TABLE IF NOT EXISTS {fqn}.MESSAGES (
             MESSAGE_ID   VARCHAR PRIMARY KEY,
             SESSION_ID   VARCHAR,
             TURN_INDEX   INT,
@@ -138,11 +158,11 @@ def ensure_tables(conn):
     cur.close()
 
 
-def ensure_search_services(conn):
+def ensure_search_services(conn, fqn):
     """Create or replace Cortex Search services. Call after data + summaries are loaded."""
     cur = conn.cursor()
-    cur.execute("""
-        CREATE OR REPLACE CORTEX SEARCH SERVICE DEMOS.AGENT_MEMORY.MESSAGES_SEARCH
+    cur.execute(f"""
+        CREATE OR REPLACE CORTEX SEARCH SERVICE {fqn}.MESSAGES_SEARCH
           ON CONTENT
           ATTRIBUTES SESSION_ID, ROLE
           WAREHOUSE = COMPUTE_WH
@@ -150,12 +170,12 @@ def ensure_search_services(conn):
           COMMENT = 'Search CoCo conversation turns by content. Filter by SESSION_ID or ROLE.'
         AS (
           SELECT MESSAGE_ID, SESSION_ID, TURN_INDEX, ROLE, CONTENT, CREATED_AT
-          FROM DEMOS.AGENT_MEMORY.MESSAGES
+          FROM {fqn}.MESSAGES
           WHERE CONTENT IS NOT NULL
         )
     """)
-    cur.execute("""
-        CREATE OR REPLACE CORTEX SEARCH SERVICE DEMOS.AGENT_MEMORY.CONVERSATIONS_SEARCH
+    cur.execute(f"""
+        CREATE OR REPLACE CORTEX SEARCH SERVICE {fqn}.CONVERSATIONS_SEARCH
           ON SUMMARY
           ATTRIBUTES TITLE, SOURCE
           WAREHOUSE = COMPUTE_WH
@@ -163,7 +183,7 @@ def ensure_search_services(conn):
           COMMENT = 'Search CoCo conversations by summary. Filter by TITLE or SOURCE.'
         AS (
           SELECT SESSION_ID, TITLE, SOURCE, SUMMARY, STARTED_AT, LAST_MESSAGE_AT, MESSAGE_COUNT
-          FROM DEMOS.AGENT_MEMORY.CONVERSATIONS
+          FROM {fqn}.CONVERSATIONS
           WHERE SUMMARY IS NOT NULL
         )
     """)

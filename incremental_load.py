@@ -1,14 +1,17 @@
 """Incremental load: fetch only new/updated conversations since last load."""
 
+import argparse
 import json
 from datetime import datetime, timezone
 
 import pandas as pd
 
 from core import (
+    add_common_args,
     ensure_search_services,
     ensure_tables,
     fetch_transcript,
+    get_config,
     get_snowflake_connection,
     list_conversations,
     parse_messages,
@@ -17,14 +20,17 @@ from core import (
 from snowflake.connector.pandas_tools import write_pandas
 
 
-def incremental_load():
+def incremental_load(connection_name=None, database=None, schema=None):
+    db, sc = get_config(database, schema)
+    fqn = f"{db}.{sc}"
+
     print("Connecting to Snowflake...")
-    conn = get_snowflake_connection()
-    ensure_tables(conn)
+    conn = get_snowflake_connection(connection_name)
+    ensure_tables(conn, fqn)
     cur = conn.cursor()
 
     # Read watermark: latest LAST_LOADED_AT across all conversations
-    cur.execute("SELECT MAX(LAST_LOADED_AT)::VARCHAR FROM DEMOS.AGENT_MEMORY.CONVERSATIONS")
+    cur.execute(f"SELECT MAX(LAST_LOADED_AT)::VARCHAR FROM {fqn}.CONVERSATIONS")
     row = cur.fetchone()
     watermark = row[0] if row and row[0] else None
 
@@ -48,7 +54,7 @@ def incremental_load():
     placeholders = ",".join(["%s"] * len(delta_sids))
     cur.execute(f"""
         SELECT SESSION_ID, MAX(TURN_INDEX) 
-        FROM DEMOS.AGENT_MEMORY.MESSAGES 
+        FROM {fqn}.MESSAGES 
         WHERE SESSION_ID IN ({placeholders})
         GROUP BY SESSION_ID
     """, delta_sids)
@@ -83,8 +89,8 @@ def incremental_load():
 
         # MERGE conversation (upsert metadata + transcript)
         cur.execute(
-            """
-            MERGE INTO DEMOS.AGENT_MEMORY.CONVERSATIONS tgt
+            f"""
+            MERGE INTO {fqn}.CONVERSATIONS tgt
             USING (
                 SELECT %s AS SESSION_ID, %s AS TITLE, %s AS SOURCE,
                        TRY_TO_TIMESTAMP_NTZ(%s) AS UPDATED,
@@ -133,15 +139,15 @@ def incremental_load():
     if new_msg_rows:
         print(f"Inserting {len(new_msg_rows)} new message rows...", flush=True)
         df_msg = pd.DataFrame(new_msg_rows)
-        write_pandas(conn, df_msg, "MESSAGES", database="DEMOS", schema="AGENT_MEMORY")
+        write_pandas(conn, df_msg, "MESSAGES", database=db, schema=sc)
 
     loaded = len(conversations) - errors
     print(f"\nProcessed {loaded} conversations ({errors} skipped)")
 
     # Re-summarize stale summaries
     print("Updating stale summaries via AI_COMPLETE...")
-    cur.execute("""
-        UPDATE DEMOS.AGENT_MEMORY.CONVERSATIONS
+    cur.execute(f"""
+        UPDATE {fqn}.CONVERSATIONS
         SET SUMMARY = AI_COMPLETE(
                 'llama3.1-70b',
                 'Summarize this Cortex Code conversation in 2-3 sentences. Focus on what was discussed and accomplished:\\n\\n' ||
@@ -156,7 +162,7 @@ def incremental_load():
 
     # Refresh Cortex Search services (picks up new/updated data)
     print("Refreshing Cortex Search services...", flush=True)
-    ensure_search_services(conn)
+    ensure_search_services(conn, fqn)
     print("  Search services refreshed")
 
     cur.close()
@@ -165,4 +171,7 @@ def incremental_load():
 
 
 if __name__ == "__main__":
-    incremental_load()
+    parser = argparse.ArgumentParser(description="Incremental load of CoCo conversations")
+    add_common_args(parser)
+    args = parser.parse_args()
+    incremental_load(args.snowflake_connection, args.database, args.schema)
