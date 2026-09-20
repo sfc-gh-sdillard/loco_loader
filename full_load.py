@@ -27,7 +27,7 @@ def full_load():
     cur.execute("TRUNCATE TABLE IF EXISTS DEMOS.AGENT_MEMORY.MESSAGES")
     cur.execute("TRUNCATE TABLE IF EXISTS DEMOS.AGENT_MEMORY.CONVERSATIONS")
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     conv_rows = []
     msg_rows = []

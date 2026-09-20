@@ -54,7 +54,7 @@ def incremental_load():
     """, delta_sids)
     existing_max_turn = {r[0]: r[1] for r in cur.fetchall()}
 
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     errors = 0
     new_msg_rows = []
 
