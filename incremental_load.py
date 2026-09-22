@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 
 import pandas as pd
+from snowflake.connector.pandas_tools import write_pandas
 
 from core import (
     add_common_args,
@@ -16,8 +17,6 @@ from core import (
     list_conversations,
     parse_messages,
 )
-
-from snowflake.connector.pandas_tools import write_pandas
 
 
 def incremental_load(connection_name=None, database=None, schema=None):

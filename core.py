@@ -64,9 +64,10 @@ def get_snowflake_connection(connection_name=None):
 
 def list_conversations(after=None):
     """Call `cortex conversations search` and return list of dicts with id, updated, title, source."""
-    cmd = ["cortex", "conversations", "search", "--limit", "1000", "--output", "csv", ""]
+    cmd = ["cortex", "conversations", "search", "--limit", "100", "--output", "csv"]
     if after:
         cmd.extend(["--after", after])
+    cmd.append("")
 
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     reader = csv.DictReader(io.StringIO(result.stdout))
