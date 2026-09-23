@@ -150,7 +150,7 @@ def incremental_load(connection_name=None, database=None, schema=None):
         UPDATE {fqn}.CONVERSATIONS
         SET SUMMARY = AI_COMPLETE(
                 'llama3.1-8b',
-                'summarize this cortex code conversation. Focus on what was discussed and accomplished. No preamble about what's contained in the response. Only return the summary:\\n\\n' ||
+                'summarize this cortex code conversation. Focus on what was discussed and accomplished. No preamble about the response. Only return the summary:\\n\\n' ||
                 TRANSCRIPT::VARCHAR
             ),
             SUMMARY_UPDATED_AT = CURRENT_TIMESTAMP()
