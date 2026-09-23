@@ -1,0 +1,4 @@
+{"role":"user","content":[{"type":"text","text":"<system-reminder>Connected to account X.</system-reminder>\n\nshow me the tables in my schema"}]}
+{"role":"assistant","content":[{"type":"text","text":"Here are the tables in your schema:\n\n| Table | Rows |\n|---|---|\n| ORDERS | 1500 |\n| CUSTOMERS | 300 |"}]}
+{"role":"user","content":[{"type":"text","text":"how many rows in orders?"}]}
+{"role":"assistant","content":[{"type":"text","text":"The ORDERS table has 1,500 rows."},{"type":"tool_result","tool_result":{"content":[{"type":"text","text":"Query returned 1500"}]}}]}

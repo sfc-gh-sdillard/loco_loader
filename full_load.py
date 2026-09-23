@@ -4,6 +4,9 @@ import argparse
 import json
 from datetime import datetime, timezone
 
+import pandas as pd
+from snowflake.snowpark import Session
+
 from core import (
     add_common_args,
     ensure_search_services,
@@ -75,24 +78,22 @@ def full_load(connection_name=None, database=None, schema=None):
 
     # Phase 2: Bulk insert conversations
     print("Loading conversations...", flush=True)
-    for row in conv_rows:
-        cur.execute(f"""
-            INSERT INTO {fqn}.CONVERSATIONS
-                (SESSION_ID, TITLE, SOURCE, STARTED_AT, LAST_MESSAGE_AT,
-                 LAST_LOADED_AT, MESSAGE_COUNT, TRANSCRIPT)
-            SELECT %s, %s, %s, TRY_TO_TIMESTAMP_NTZ(%s), TRY_TO_TIMESTAMP_NTZ(%s),
-                   %s::TIMESTAMP_NTZ, %s, PARSE_JSON(%s)
-        """, row)
+    cur.executemany(f"""
+        INSERT INTO {fqn}.CONVERSATIONS
+            (SESSION_ID, TITLE, SOURCE, STARTED_AT, LAST_MESSAGE_AT,
+             LAST_LOADED_AT, MESSAGE_COUNT, TRANSCRIPT)
+        SELECT %s, %s, %s, TRY_TO_TIMESTAMP_NTZ(%s), TRY_TO_TIMESTAMP_NTZ(%s),
+               %s::TIMESTAMP_NTZ, %s, PARSE_JSON(%s)
+    """, conv_rows)
     print(f"  Loaded {len(conv_rows)} conversation rows")
 
-    # Phase 3: Bulk insert messages
+    # Phase 3: Bulk insert messages via Snowpark
     print("Loading messages...", flush=True)
-    for row in msg_rows:
-        cur.execute(f"""
-            INSERT INTO {fqn}.MESSAGES
-                (MESSAGE_ID, SESSION_ID, TURN_INDEX, ROLE, CONTENT, RAW_CONTENT, CREATED_AT)
-            SELECT %s, %s, %s, %s, %s, PARSE_JSON(%s), TRY_TO_TIMESTAMP_NTZ(%s)
-        """, row)
+    session = Session.builder.configs({"connection": conn}).create()
+    df_msg = pd.DataFrame(msg_rows, columns=[
+        "MESSAGE_ID", "SESSION_ID", "TURN_INDEX", "ROLE", "CONTENT", "RAW_CONTENT", "CREATED_AT"
+    ])
+    session.write_pandas(df_msg, "MESSAGES", database=db, schema=sc)
     print(f"  Loaded {len(msg_rows)} message rows")
 
     # Phase 4: Generate summaries

@@ -5,7 +5,7 @@ import json
 from datetime import datetime, timezone
 
 import pandas as pd
-from snowflake.connector.pandas_tools import write_pandas
+from snowflake.snowpark import Session
 
 from core import (
     add_common_args,
@@ -138,7 +138,8 @@ def incremental_load(connection_name=None, database=None, schema=None):
     if new_msg_rows:
         print(f"Inserting {len(new_msg_rows)} new message rows...", flush=True)
         df_msg = pd.DataFrame(new_msg_rows)
-        write_pandas(conn, df_msg, "MESSAGES", database=db, schema=sc)
+        session = Session.builder.configs({"connection": conn}).create()
+        session.write_pandas(df_msg, "MESSAGES", database=db, schema=sc)
 
     loaded = len(conversations) - errors
     print(f"\nProcessed {loaded} conversations ({errors} skipped)")
