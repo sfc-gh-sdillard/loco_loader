@@ -26,7 +26,7 @@ def full_load(connection_name=None, database=None, schema=None):
     cur = conn.cursor()
 
     print("Fetching conversation list...")
-    conversations = list_conversations()
+    conversations = list_conversations(connection_name=connection_name)
     print(f"Found {len(conversations)} conversations")
 
     # Truncate both tables for clean reload
@@ -49,7 +49,7 @@ def full_load(connection_name=None, database=None, schema=None):
         print(f"  [{i+1}/{len(conversations)}] {sid}: {title[:60]}...", end=" ", flush=True)
 
         try:
-            transcript = fetch_transcript(sid)
+            transcript = fetch_transcript(sid, connection_name=connection_name)
         except Exception as e:
             print(f"SKIP (fetch error: {e})")
             errors += 1
@@ -100,8 +100,8 @@ def full_load(connection_name=None, database=None, schema=None):
     cur.execute(f"""
         UPDATE {fqn}.CONVERSATIONS
         SET SUMMARY = AI_COMPLETE(
-                'llama3.1-70b',
-                'Summarize this Cortex Code conversation in 2-3 sentences. Focus on what was discussed and accomplished:\\n\\n' ||
+                'llama3.1-8b',
+                'summarize this cortex code conversation. Focus on what was discussed and accomplished. No preamble about what's contained in the response. Only return the summary:\\n\\n' ||
                 TRANSCRIPT::VARCHAR
             ),
             SUMMARY_UPDATED_AT = CURRENT_TIMESTAMP()

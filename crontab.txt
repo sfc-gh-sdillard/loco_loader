@@ -1,0 +1,8 @@
+# loco_loader cron schedule
+# Install:  crontab crontab.txt
+# View:     crontab -l
+# Remove:   crontab -r
+
+# Run incremental sync every 4 hours during work hours (8am-8pm)
+SNOWFLAKE_CONNECTION=demo-account-admin-sdillard
+0 8,12,16,20 * * * /Users/samdillard/projects/loco_loader/cron_sync.sh

@@ -39,7 +39,7 @@ def incremental_load(connection_name=None, database=None, schema=None):
         print("No watermark found — table is empty. Run full_load.py first, or this will load everything.")
 
     # Fetch conversations updated after watermark
-    conversations = list_conversations(after=watermark)
+    conversations = list_conversations(after=watermark, connection_name=connection_name)
     if not conversations:
         print("No new or updated conversations. Nothing to do.")
         cur.close()
@@ -72,7 +72,7 @@ def incremental_load(connection_name=None, database=None, schema=None):
         print(f"  [{i+1}/{len(conversations)}] {sid}: {title[:60]}...", end=" ", flush=True)
 
         try:
-            transcript = fetch_transcript(sid)
+            transcript = fetch_transcript(sid, connection_name=connection_name)
         except Exception as e:
             print(f"SKIP (fetch error: {e})")
             errors += 1
@@ -148,8 +148,8 @@ def incremental_load(connection_name=None, database=None, schema=None):
     cur.execute(f"""
         UPDATE {fqn}.CONVERSATIONS
         SET SUMMARY = AI_COMPLETE(
-                'llama3.1-70b',
-                'Summarize this Cortex Code conversation in 2-3 sentences. Focus on what was discussed and accomplished:\\n\\n' ||
+                'llama3.1-8b',
+                'summarize this cortex code conversation. Focus on what was discussed and accomplished. No preamble about what's contained in the response. Only return the summary:\\n\\n' ||
                 TRANSCRIPT::VARCHAR
             ),
             SUMMARY_UPDATED_AT = CURRENT_TIMESTAMP()

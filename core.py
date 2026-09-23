@@ -62,22 +62,27 @@ def get_snowflake_connection(connection_name=None):
     )
 
 
-def list_conversations(after=None):
+def list_conversations(after=None, connection_name=None):
     """Call `cortex conversations search` and return list of dicts with id, updated, title, source."""
     cmd = ["cortex", "conversations", "search", "--limit", "100", "--output", "csv"]
+    if connection_name:
+        cmd.extend(["--connection", connection_name])
     if after:
         cmd.extend(["--after", after])
     cmd.append("")
 
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
     reader = csv.DictReader(io.StringIO(result.stdout))
     return list(reader)
 
 
-def fetch_transcript(session_id):
+def fetch_transcript(session_id, connection_name=None):
     """Call `cortex conversations transcript` and return list of message dicts (NDJSON lines)."""
-    cmd = ["cortex", "conversations", "transcript", "--output", "json", str(session_id)]
-    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    cmd = ["cortex", "conversations", "transcript", "--output", "json"]
+    if connection_name:
+        cmd.extend(["--connection", connection_name])
+    cmd.append(str(session_id))
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
 
     messages = []
     for line in result.stdout.strip().splitlines():
